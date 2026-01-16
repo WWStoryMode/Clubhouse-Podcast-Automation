@@ -1,0 +1,126 @@
+# ============================================
+# Clubhouse-Podcast-Automation Configuration
+# ============================================
+# Copy this file to config.yaml and customize
+#
+# Legend:
+#   [LOCAL]  - Only used in local deployment
+#   [CLOUD]  - Only used in cloud deployment
+#   [BOTH]   - Used in both local and cloud deployment
+
+# -----------------------------
+# Deployment Mode [BOTH]
+# -----------------------------
+# Set to "local" or "cloud"
+mode: local
+
+# -----------------------------
+# Local Mode Settings [LOCAL]
+# -----------------------------
+# Only used when mode: local
+local:
+  # Directory for output files (audio, transcripts, videos)
+  output_dir: "./output"
+
+  # Path to ffmpeg binary
+  # macOS: "ffmpeg" (if installed via brew) or "/opt/homebrew/bin/ffmpeg"
+  # Linux: "ffmpeg" or "/usr/bin/ffmpeg"
+  # Windows: "C:\\ffmpeg\\bin\\ffmpeg.exe"
+  ffmpeg_path: "ffmpeg"
+
+# -----------------------------
+# Cloud Mode Settings [CLOUD]
+# -----------------------------
+# Only used when mode: cloud
+cloud:
+  # Cloud provider: gcp, aws, or azure
+  provider: gcp
+
+  # GCP Settings
+  project_id: "my-gcp-project"
+  region: "us-central1"
+
+  # Cloud storage bucket for outputs
+  storage_bucket: "my-podcast-automation"
+
+  # Paths within the bucket
+  templates_path: "templates/"
+  output_path: "output/"
+
+# -----------------------------
+# Template Assets [BOTH]
+# -----------------------------
+# Paths are relative to project root (local) or bucket (cloud)
+templates:
+  # Background image for video (1920x1080 recommended)
+  background: "templates/background.png"
+
+  # Icon/logo overlay
+  icon: "templates/icon.png"
+
+  # Font for text rendering (TTF file)
+  # Leave empty to use system default
+  font: "templates/fonts/Inter-Bold.ttf"
+
+# -----------------------------
+# Video Generation Settings [BOTH]
+# -----------------------------
+video:
+  # Output resolution [width, height]
+  resolution: [1920, 1080]
+
+  # Frames per second
+  fps: 30
+
+  # Waveform visualization
+  waveform_color: "#00FF88"
+  waveform_height: 200        # pixels
+  waveform_style: "bars"      # "bars" or "line"
+
+  # Text styling
+  text_color: "#FFFFFF"
+  title_font_size: 48
+  subtitle_font_size: 24
+
+  # Video encoding
+  codec: "libx264"
+  bitrate: "5000k"
+
+# -----------------------------
+# Transcription Settings [BOTH]
+# -----------------------------
+transcription:
+  # Language code (ISO 639-1)
+  language: "en"
+
+  # Include timestamps in transcript
+  include_timestamps: false
+
+# -----------------------------
+# Summary Generation Settings [BOTH]
+# -----------------------------
+summary:
+  # Max characters for descriptions
+  youtube_max_length: 5000
+  spotify_max_length: 4000
+
+  # Tag generation
+  generate_tags: true
+  max_tags: 10
+
+# -----------------------------
+# YouTube Upload Settings [BOTH]
+# -----------------------------
+youtube:
+  # Default privacy status: private, unlisted, or public
+  default_privacy: "private"
+
+  # Category ID (22 = People & Blogs)
+  # Full list: https://developers.google.com/youtube/v3/docs/videoCategories/list
+  category_id: "22"
+
+  # Default language
+  default_language: "en"
+
+  # Add to playlist (optional, leave empty to skip)
+  playlist_id: ""
