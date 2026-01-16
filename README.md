@@ -14,10 +14,10 @@ An open-source tool to automate publishing Clubhouse recordings to Spotify and Y
 
 ## Deployment Options
 
-| Mode | Best For | Infrastructure |
-|------|----------|----------------|
-| **Local** | Individual creators, development | Your machine |
-| **Cloud** | Teams, automation, scheduled jobs | GCP Cloud Run Jobs |
+| Mode | Best For | Infrastructure | Status |
+|------|----------|----------------|--------|
+| **Local** | Individual creators, development | Your machine | Available |
+| **Cloud** | Teams, automation, scheduled jobs | GCP Cloud Run Jobs | *To be implemented* |
 
 ## Quick Start (Local)
 
@@ -32,7 +32,7 @@ An open-source tool to automate publishing Clubhouse recordings to Spotify and Y
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/Clubhouse-Podcast-Automation.git
+git clone https://github.com/WWStoryMode/Clubhouse-Podcast-Automation.git
 cd Clubhouse-Podcast-Automation
 
 # Create virtual environment
@@ -79,21 +79,13 @@ python -m src.cli upload-youtube --input output/videos/video.mp4
 
 ## Cloud Deployment (GCP)
 
-See [Cloud Deployment Guide](docs/cloud-deployment.md) for detailed instructions.
-
-```bash
-# Quick start
-gcloud run jobs execute podcast-automation \
-  --args="process,--url,https://clubhouse.com/...,--title,Episode 1"
-```
-
-## Documentation
-
-- [Getting Started](docs/getting-started.md)
-- [Local Setup](docs/local-setup.md)
-- [Cloud Deployment](docs/cloud-deployment.md)
-- [Configuration](docs/configuration.md)
-- [API Setup](docs/api-setup.md)
+> **Status:** To be implemented
+>
+> Cloud deployment via GCP Cloud Run Jobs is planned for a future release. This will enable:
+> - Scheduled/automated processing
+> - Team collaboration
+> - Webhook triggers
+> - Cloud storage integration
 
 ## Project Structure
 
@@ -117,8 +109,7 @@ Clubhouse-Podcast-Automation/
 │
 ├── config/                   # Configuration
 ├── templates/                # Video templates
-├── output/                   # Generated files
-└── deploy/                   # Deployment configs
+└── output/                   # Generated files
 ```
 
 ## Technology Stack
