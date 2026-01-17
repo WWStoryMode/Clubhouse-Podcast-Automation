@@ -41,7 +41,7 @@ def generate_descriptions(
     spotify_max_length: int = 4000,
     generate_tags: bool = True,
     max_tags: int = 10,
-    model_name: str = "gemini-1.5-flash",
+    model_name: str = "gemini-3-flash-preview",
 ) -> dict:
     """
     Generate platform-specific descriptions using Gemini API.

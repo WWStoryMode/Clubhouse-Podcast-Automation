@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 
 from .core.downloader import download_clubhouse_video, DownloadError
 from .core.audio_extractor import extract_audio, AudioExtractionError
-from .core.transcriber import transcribe_audio, TranscriptionError
+from .core.transcriber import transcribe_audio, transcribe_audio_chunked, TranscriptionError
 from .core.summarizer import generate_descriptions, SummaryError
 
 
@@ -119,8 +119,11 @@ def extract(ctx, input_path, output):
 @click.option("--input", "-i", "input_path", required=True, type=click.Path(exists=True), help="Input audio file")
 @click.option("--output", "-o", type=click.Path(), help="Output transcript file")
 @click.option("--language", "-l", default="en", help="Language code (default: en)")
+@click.option("--timestamps", "-t", is_flag=True, help="Include timestamps in transcript")
+@click.option("--chunked", is_flag=True, help="Use chunked transcription for long audio files")
+@click.option("--chunk-minutes", default=10, type=int, help="Chunk duration in minutes (default: 10)")
 @click.pass_context
-def transcribe(ctx, input_path, output, language):
+def transcribe(ctx, input_path, output, language, timestamps, chunked, chunk_minutes):
     """Transcribe audio file using Gemini API."""
     config = ctx.obj["config"]
     api_key = os.environ.get("GEMINI_API_KEY")
@@ -132,12 +135,23 @@ def transcribe(ctx, input_path, output, language):
     click.echo(f"Transcribing: {input_path}")
 
     try:
-        transcript = transcribe_audio(
-            audio_path=Path(input_path),
-            api_key=api_key,
-            language=language,
-            include_timestamps=config.get("transcription", {}).get("include_timestamps", False),
-        )
+        if chunked:
+            click.echo(f"Using chunked transcription ({chunk_minutes} min chunks)...")
+            transcript = transcribe_audio_chunked(
+                audio_path=Path(input_path),
+                api_key=api_key,
+                language=language,
+                chunk_duration_minutes=chunk_minutes,
+                include_timestamps=timestamps,
+                show_progress=True,
+            )
+        else:
+            transcript = transcribe_audio(
+                audio_path=Path(input_path),
+                api_key=api_key,
+                language=language,
+                include_timestamps=timestamps or config.get("transcription", {}).get("include_timestamps", False),
+            )
 
         # Save transcript
         if output:
