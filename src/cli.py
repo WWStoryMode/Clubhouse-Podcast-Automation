@@ -118,12 +118,13 @@ def extract(ctx, input_path, output):
 @cli.command()
 @click.option("--input", "-i", "input_path", required=True, type=click.Path(exists=True), help="Input audio file")
 @click.option("--output", "-o", type=click.Path(), help="Output transcript file")
-@click.option("--language", "-l", default="en", help="Language code (default: en)")
+@click.option("--language", "-l", default="en", help="Language code: en, yue, zh, zh-HK, zh-TW, ja, ko, etc. (default: en)")
 @click.option("--timestamps", "-t", is_flag=True, help="Include timestamps in transcript")
 @click.option("--chunked", is_flag=True, help="Use chunked transcription for long audio files")
 @click.option("--chunk-minutes", default=10, type=int, help="Chunk duration in minutes (default: 10)")
+@click.option("--model", "-m", default="gemini-2.5-flash", help="Gemini model to use (default: gemini-2.5-flash)")
 @click.pass_context
-def transcribe(ctx, input_path, output, language, timestamps, chunked, chunk_minutes):
+def transcribe(ctx, input_path, output, language, timestamps, chunked, chunk_minutes, model):
     """Transcribe audio file using Gemini API."""
     config = ctx.obj["config"]
     api_key = os.environ.get("GEMINI_API_KEY")
@@ -133,6 +134,7 @@ def transcribe(ctx, input_path, output, language, timestamps, chunked, chunk_min
         sys.exit(1)
 
     click.echo(f"Transcribing: {input_path}")
+    click.echo(f"Using model: {model}")
 
     try:
         if chunked:
@@ -143,6 +145,7 @@ def transcribe(ctx, input_path, output, language, timestamps, chunked, chunk_min
                 language=language,
                 chunk_duration_minutes=chunk_minutes,
                 include_timestamps=timestamps,
+                model_name=model,
                 show_progress=True,
             )
         else:
@@ -151,6 +154,7 @@ def transcribe(ctx, input_path, output, language, timestamps, chunked, chunk_min
                 api_key=api_key,
                 language=language,
                 include_timestamps=timestamps or config.get("transcription", {}).get("include_timestamps", False),
+                model_name=model,
             )
 
         # Save transcript

@@ -75,13 +75,41 @@ def transcribe_audio(
 
     # Map language codes to human-readable descriptions
     language_map = {
+        # Chinese variants
         "yue": "Cantonese (Hong Kong)",
         "zh-HK": "Cantonese (Hong Kong)",
         "zh": "Mandarin Chinese",
+        "zh-CN": "Mandarin Chinese (Simplified)",
         "zh-TW": "Traditional Chinese (Taiwan)",
+        # East Asian
+        "ja": "Japanese",
+        "ko": "Korean",
+        # Southeast Asian
+        "vi": "Vietnamese",
+        "th": "Thai",
+        "id": "Indonesian",
+        "ms": "Malay",
+        "tl": "Tagalog (Filipino)",
+        # European
         "en": "English",
+        "es": "Spanish",
+        "fr": "French",
+        "de": "German",
+        "it": "Italian",
+        "pt": "Portuguese",
+        "nl": "Dutch",
+        "ru": "Russian",
+        # South Asian
+        "hi": "Hindi",
+        "ta": "Tamil",
+        # Middle Eastern
+        "ar": "Arabic",
+        "he": "Hebrew",
     }
-    language_desc = language_map.get(language, language)
+    language_desc = language_map.get(language)
+    if language_desc is None:
+        print(f"Note: Language code '{language}' not in mapping, using as-is")
+        language_desc = language
 
     # Build the prompt
     if include_timestamps:
