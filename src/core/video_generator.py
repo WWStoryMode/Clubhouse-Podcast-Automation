@@ -1,9 +1,10 @@
 """Generate video with waveform visualization for podcast episodes using ffmpeg."""
 
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List, Dict
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -11,6 +12,118 @@ from PIL import Image, ImageDraw, ImageFont
 class VideoGenerationError(Exception):
     """Raised when video generation fails."""
     pass
+
+
+# Encoder configurations
+ENCODERS: Dict[str, Dict] = {
+    "cpu": {
+        "codec": "libx264",
+        "description": "CPU encoding (portable, consistent quality)",
+        "extra_args": [],
+    },
+    "videotoolbox": {
+        "codec": "h264_videotoolbox",
+        "description": "macOS GPU acceleration",
+        "extra_args": ["-allow_sw", "1"],  # Allow software fallback
+    },
+    "nvenc": {
+        "codec": "h264_nvenc",
+        "description": "NVIDIA GPU acceleration",
+        "extra_args": [],
+    },
+    "vaapi": {
+        "codec": "h264_vaapi",
+        "description": "Linux VA-API (Intel/AMD) acceleration",
+        "extra_args": ["-vaapi_device", "/dev/dri/renderD128"],
+    },
+    "qsv": {
+        "codec": "h264_qsv",
+        "description": "Intel Quick Sync Video acceleration",
+        "extra_args": [],
+    },
+    "amf": {
+        "codec": "h264_amf",
+        "description": "AMD GPU acceleration",
+        "extra_args": [],
+    },
+}
+
+
+def get_available_encoders(ffmpeg_path: str = "ffmpeg") -> List[str]:
+    """
+    Detect available hardware encoders on the system.
+
+    Args:
+        ffmpeg_path: Path to ffmpeg executable
+
+    Returns:
+        List of available encoder names
+    """
+    available = ["cpu"]  # CPU is always available
+
+    try:
+        result = subprocess.run(
+            [ffmpeg_path, "-hide_banner", "-encoders"],
+            capture_output=True,
+            text=True,
+        )
+        encoder_output = result.stdout
+
+        # Check for each hardware encoder
+        encoder_checks = {
+            "videotoolbox": "h264_videotoolbox",
+            "nvenc": "h264_nvenc",
+            "vaapi": "h264_vaapi",
+            "qsv": "h264_qsv",
+            "amf": "h264_amf",
+        }
+
+        for name, codec in encoder_checks.items():
+            if codec in encoder_output:
+                available.append(name)
+
+    except Exception:
+        pass  # If detection fails, just return cpu
+
+    return available
+
+
+def detect_best_encoder(ffmpeg_path: str = "ffmpeg") -> str:
+    """
+    Auto-detect the best available encoder for the current system.
+
+    Priority order:
+    1. videotoolbox (macOS)
+    2. nvenc (NVIDIA GPU)
+    3. qsv (Intel Quick Sync)
+    4. vaapi (Linux VA-API)
+    5. amf (AMD GPU)
+    6. cpu (fallback)
+
+    Args:
+        ffmpeg_path: Path to ffmpeg executable
+
+    Returns:
+        Name of the best available encoder
+    """
+    available = get_available_encoders(ffmpeg_path)
+
+    # Platform-specific priority
+    if sys.platform == "darwin":
+        # macOS: prefer VideoToolbox
+        priority = ["videotoolbox", "cpu"]
+    elif sys.platform == "linux":
+        # Linux: prefer NVENC, then VAAPI, then QSV
+        priority = ["nvenc", "vaapi", "qsv", "amf", "cpu"]
+    else:
+        # Windows: prefer NVENC, then QSV, then AMF
+        priority = ["nvenc", "qsv", "amf", "cpu"]
+
+    for encoder in priority:
+        if encoder in available:
+            return encoder
+
+    return "cpu"
 
 
 def get_audio_duration(audio_path: Path, ffprobe_path: str = "ffprobe") -> float:
@@ -165,6 +278,8 @@ def generate_video(
     waveform_height: int = 200,
     bg_color: Tuple[int, int, int] = (20, 20, 30),
     icon_size: Tuple[int, int] = (200, 200),
+    compact: bool = False,
+    encoder: str = "auto",
     show_progress: bool = True,
     ffmpeg_path: str = "ffmpeg",
     ffprobe_path: str = "ffprobe",
@@ -189,6 +304,8 @@ def generate_video(
         waveform_height: Height of waveform visualization
         bg_color: RGB background color (if no background image)
         icon_size: Size for icon/logo
+        compact: Use compact encoding (smaller file, slower encoding)
+        encoder: Encoder to use (auto, cpu, videotoolbox, nvenc, vaapi, qsv, amf)
         show_progress: Whether to show progress
         ffmpeg_path: Path to ffmpeg executable
         ffprobe_path: Path to ffprobe executable
@@ -259,6 +376,41 @@ def generate_video(
             f"[bg][wave]overlay={wave_x}:{wave_y}[out]"
         )
 
+        # Determine encoder
+        if encoder == "auto":
+            selected_encoder = detect_best_encoder(ffmpeg_path)
+        else:
+            selected_encoder = encoder
+
+        if selected_encoder not in ENCODERS:
+            raise VideoGenerationError(f"Unknown encoder: {selected_encoder}")
+
+        encoder_config = ENCODERS[selected_encoder]
+
+        if show_progress:
+            print(f"Using encoder: {selected_encoder} ({encoder_config['description']})")
+
+        # Encoding settings based on compact mode
+        if compact:
+            # Compact: smaller file, slower encoding
+            audio_bitrate = "128k"
+            if selected_encoder == "cpu":
+                preset = "medium"
+                crf = "28"
+            else:
+                # Hardware encoders use different quality settings
+                preset = "default"
+                crf = "28"
+        else:
+            # Fast: faster encoding, larger file
+            audio_bitrate = "192k"
+            if selected_encoder == "cpu":
+                preset = "fast"
+                crf = "23"
+            else:
+                preset = "default"
+                crf = "23"
+
         # Build ffmpeg command
         cmd = [
             ffmpeg_path, "-y",
@@ -267,14 +419,33 @@ def generate_video(
             "-filter_complex", filter_complex,
             "-map", "[out]",
             "-map", "0:a",
-            "-c:v", "libx264",
-            "-preset", "fast",
-            "-crf", "23",
+            "-c:v", encoder_config["codec"],
+        ]
+
+        # Add encoder-specific arguments
+        cmd.extend(encoder_config["extra_args"])
+
+        # Add quality settings (different for CPU vs hardware)
+        if selected_encoder == "cpu":
+            cmd.extend(["-preset", preset, "-crf", crf])
+        elif selected_encoder == "videotoolbox":
+            # VideoToolbox uses bitrate mode
+            bitrate = "2M" if compact else "4M"
+            cmd.extend(["-b:v", bitrate])
+        elif selected_encoder == "nvenc":
+            # NVENC uses -cq for constant quality mode
+            cmd.extend(["-rc", "vbr", "-cq", crf, "-preset", "p4" if compact else "p1"])
+        elif selected_encoder in ("vaapi", "qsv", "amf"):
+            # Use global quality for other hardware encoders
+            cmd.extend(["-global_quality", crf])
+
+        # Add audio settings
+        cmd.extend([
             "-c:a", "aac",
-            "-b:a", "192k",
+            "-b:a", audio_bitrate,
             "-shortest",
             str(output_path),
-        ]
+        ])
 
         # Run ffmpeg
         if show_progress:

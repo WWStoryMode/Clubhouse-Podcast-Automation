@@ -13,7 +13,7 @@ from .core.downloader import download_clubhouse_video, DownloadError
 from .core.audio_extractor import extract_audio, AudioExtractionError
 from .core.transcriber import transcribe_audio, transcribe_audio_chunked, TranscriptionError
 from .core.summarizer import generate_descriptions, SummaryError
-from .core.video_generator import generate_video, VideoGenerationError
+from .core.video_generator import generate_video, VideoGenerationError, get_available_encoders
 
 
 # Load environment variables
@@ -241,7 +241,7 @@ def parse_color(color_str: str) -> tuple:
 
 
 @cli.command("generate-video")
-@click.option("--input", "-i", "input_path", required=True, type=click.Path(exists=True), help="Input audio file")
+@click.option("--input", "-i", "input_path", type=click.Path(exists=True), help="Input audio file")
 @click.option("--output", "-o", type=click.Path(), help="Output video file")
 @click.option("--title", "-t", default="", help="Title text to display on video")
 @click.option("--background", "-bg", type=click.Path(exists=True), help="Background image path")
@@ -253,9 +253,27 @@ def parse_color(color_str: str) -> tuple:
 @click.option("--waveform-height", default=200, type=int, help="Waveform height (default: 200)")
 @click.option("--waveform-color", default="0,200,255", help="Waveform color as R,G,B (default: 0,200,255)")
 @click.option("--bg-color", default="20,20,30", help="Background color as R,G,B (default: 20,20,30)")
+@click.option("--compact", is_flag=True, help="Use compact encoding (smaller file, slower encoding)")
+@click.option("--encoder", "-e", default="auto",
+              type=click.Choice(["auto", "cpu", "videotoolbox", "nvenc", "vaapi", "qsv", "amf"]),
+              help="Video encoder (default: auto-detect)")
+@click.option("--list-encoders", is_flag=True, help="List available encoders and exit")
 @click.pass_context
-def generate_video_cmd(ctx, input_path, output, title, background, icon, width, height, fps, waveform_width, waveform_height, waveform_color, bg_color):
+def generate_video_cmd(ctx, input_path, output, title, background, icon, width, height, fps, waveform_width, waveform_height, waveform_color, bg_color, compact, encoder, list_encoders):
     """Generate video with waveform visualization from audio using ffmpeg."""
+    # Handle --list-encoders
+    if list_encoders:
+        available = get_available_encoders()
+        click.echo("Available encoders:")
+        for enc in available:
+            marker = " (recommended)" if enc == available[0] and enc != "cpu" else ""
+            click.echo(f"  - {enc}{marker}")
+        return
+
+    # Require input_path if not listing encoders
+    if not input_path:
+        raise click.UsageError("Missing option '--input' / '-i'.")
+
     config = ctx.obj["config"]
 
     # Parse colors
@@ -273,6 +291,7 @@ def generate_video_cmd(ctx, input_path, output, title, background, icon, width, 
     click.echo(f"Generating video from: {input_path}")
     click.echo(f"Resolution: {width}x{height} @ {fps}fps")
     click.echo(f"Waveform: {waveform_width}x{waveform_height}")
+    click.echo(f"Encoding: {'compact' if compact else 'fast'}")
     if title:
         click.echo(f"Title: {title}")
 
@@ -290,6 +309,8 @@ def generate_video_cmd(ctx, input_path, output, title, background, icon, width, 
             waveform_height=waveform_height,
             waveform_color=waveform_color_tuple,
             bg_color=bg_color_tuple,
+            compact=compact,
+            encoder=encoder,
             show_progress=True,
         )
         click.echo(f"Video saved to: {result}")
