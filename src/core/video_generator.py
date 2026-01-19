@@ -61,8 +61,10 @@ DEFAULT_LAYOUT = {
         "x": "center",
         "y": "auto",
         "font_size": 48,
+        "font": None,  # None = auto-detect, or path to .ttf/.ttc file
+        "bold": False,
         "color": [255, 255, 255],
-        "max_width": 1720,
+        "max_width": 1760,
     },
     "waveform": {
         "x": "center",
@@ -279,12 +281,16 @@ def create_base_image(
         title_color = tuple(title_cfg.get("color", [255, 255, 255]))
         title_x_cfg = title_cfg.get("x", "center")
         title_y_cfg = title_cfg.get("y", "auto")
-        title_max_width = title_cfg.get("max_width", width - 200)
+        title_max_width = title_cfg.get("max_width", width - 160)
+        title_font_path = title_cfg.get("font", None)
+        title_bold = title_cfg.get("bold", False)
     else:
         icon_x_cfg = "center"
         title_x_cfg = "center"
         title_y_cfg = "auto" if title_y_position is None else title_y_position
-        title_max_width = width - 200
+        title_max_width = width - 160
+        title_font_path = None
+        title_bold = False
 
     # Create or load background
     if background_path and Path(background_path).exists():
@@ -310,19 +316,50 @@ def create_base_image(
     if title:
         draw = ImageDraw.Draw(bg)
 
-        # Try to load a system font with Chinese support
+        # Load font
         font = None
-        font_paths = [
-            "/System/Library/Fonts/PingFang.ttc",
-            "/System/Library/Fonts/Helvetica.ttc",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        ]
-        for font_path in font_paths:
+
+        # Use custom font if specified
+        if title_font_path and Path(title_font_path).exists():
             try:
-                font = ImageFont.truetype(font_path, title_font_size)
-                break
+                font = ImageFont.truetype(title_font_path, title_font_size)
             except (OSError, IOError):
-                continue
+                pass
+
+        # Otherwise auto-detect system font with Chinese support
+        if font is None:
+            if title_bold:
+                # Bold font options
+                font_paths = [
+                    "/System/Library/Fonts/PingFang.ttc",  # PingFang has bold in index 1
+                    "/Library/Fonts/Arial Bold.ttf",
+                    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+                    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                ]
+                # For .ttc files, try index 1 for bold variant
+                for font_path in font_paths:
+                    try:
+                        if font_path.endswith('.ttc'):
+                            # Try bold index (usually 1 for semibold, 2 for bold)
+                            font = ImageFont.truetype(font_path, title_font_size, index=1)
+                        else:
+                            font = ImageFont.truetype(font_path, title_font_size)
+                        break
+                    except (OSError, IOError):
+                        continue
+            else:
+                # Regular font options
+                font_paths = [
+                    "/System/Library/Fonts/PingFang.ttc",
+                    "/System/Library/Fonts/Helvetica.ttc",
+                    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                ]
+                for font_path in font_paths:
+                    try:
+                        font = ImageFont.truetype(font_path, title_font_size)
+                        break
+                    except (OSError, IOError):
+                        continue
 
         if font is None:
             font = ImageFont.load_default()
@@ -372,6 +409,125 @@ def create_base_image(
 def rgb_to_hex(color: Tuple[int, int, int]) -> str:
     """Convert RGB tuple to hex string for ffmpeg."""
     return f"0x{color[0]:02X}{color[1]:02X}{color[2]:02X}"
+
+
+def generate_preview_frame(
+    output_path: Path,
+    title: str = "",
+    background_path: Optional[Path] = None,
+    icon_path: Optional[Path] = None,
+    width: int = 1920,
+    height: int = 1080,
+    waveform_color: Tuple[int, int, int] = (240, 240, 240),
+    waveform_width: int = 960,
+    waveform_height: int = 200,
+    bg_color: Tuple[int, int, int] = (20, 20, 30),
+    video_config_path: Optional[Path] = None,
+) -> Path:
+    """
+    Generate a single preview frame showing layout with placeholder waveform.
+
+    Args:
+        output_path: Path for output image
+        title: Title text to display
+        background_path: Optional background image
+        icon_path: Optional icon/logo image
+        width: Frame width
+        height: Frame height
+        waveform_color: RGB color for waveform placeholder
+        waveform_width: Width of waveform area
+        waveform_height: Height of waveform area
+        bg_color: RGB background color (if no background image)
+        video_config_path: Path to video layout config YAML file
+
+    Returns:
+        Path to generated preview image
+
+    Raises:
+        VideoGenerationError: If preview generation fails
+    """
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        # Load video config
+        layout_config = load_video_config(video_config_path)
+
+        # Get waveform settings from config
+        waveform_cfg = layout_config.get("waveform", {})
+        if video_config_path:
+            waveform_width = waveform_cfg.get("width", waveform_width)
+            waveform_height = waveform_cfg.get("height", waveform_height)
+            waveform_color = tuple(waveform_cfg.get("color", list(waveform_color)))
+
+        # Create base image
+        base_image = create_base_image(
+            width=width,
+            height=height,
+            background_path=background_path,
+            icon_path=icon_path,
+            title=title,
+            bg_color=bg_color,
+            layout_config=layout_config if video_config_path else None,
+        )
+
+        # Calculate waveform position
+        wave_x_cfg = waveform_cfg.get("x", "center")
+        wave_y_cfg = waveform_cfg.get("y", "center_offset")
+
+        if wave_x_cfg == "center":
+            wave_x = (width - waveform_width) // 2
+        else:
+            wave_x = int(wave_x_cfg)
+
+        if wave_y_cfg == "center":
+            wave_y = (height - waveform_height) // 2
+        elif wave_y_cfg == "center_offset":
+            wave_y = (height - waveform_height) // 2 + 50
+        else:
+            wave_y = int(wave_y_cfg)
+
+        # Draw placeholder waveform (simulated waveform pattern)
+        draw = ImageDraw.Draw(base_image)
+
+        # Draw waveform area background (slightly darker)
+        wave_bg = tuple(max(0, c - 20) for c in bg_color) + (100,)
+        draw.rectangle(
+            [wave_x, wave_y, wave_x + waveform_width, wave_y + waveform_height],
+            fill=wave_bg,
+        )
+
+        # Draw simulated waveform bars
+        num_bars = 48
+        bar_width = waveform_width // num_bars
+        center_y = wave_y + waveform_height // 2
+
+        import math
+        for i in range(num_bars):
+            # Create a wave pattern
+            amplitude = math.sin(i * 0.3) * 0.5 + 0.5
+            amplitude *= math.sin(i * 0.1) * 0.3 + 0.7
+            bar_height = int(waveform_height * 0.8 * amplitude * 0.5)
+
+            x = wave_x + i * bar_width + bar_width // 4
+            draw.rectangle(
+                [x, center_y - bar_height, x + bar_width // 2, center_y + bar_height],
+                fill=waveform_color,
+            )
+
+        # Draw border around waveform area
+        draw.rectangle(
+            [wave_x, wave_y, wave_x + waveform_width, wave_y + waveform_height],
+            outline=waveform_color,
+            width=1,
+        )
+
+        # Save preview
+        base_image.save(output_path, 'PNG')
+        return output_path
+
+    except Exception as e:
+        raise VideoGenerationError(f"Failed to generate preview: {e}")
 
 
 def generate_video(

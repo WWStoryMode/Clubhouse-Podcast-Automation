@@ -13,7 +13,7 @@ from .core.downloader import download_clubhouse_video, DownloadError
 from .core.audio_extractor import extract_audio, AudioExtractionError
 from .core.transcriber import transcribe_audio, transcribe_audio_chunked, TranscriptionError
 from .core.summarizer import generate_descriptions, SummaryError
-from .core.video_generator import generate_video, VideoGenerationError, get_available_encoders
+from .core.video_generator import generate_video, generate_preview_frame, VideoGenerationError, get_available_encoders
 
 
 # Load environment variables
@@ -361,6 +361,102 @@ def generate_video_cmd(ctx, input_path, output, title, background, icon, video_c
         )
         click.echo(f"Video saved to: {result}")
     except (FileNotFoundError, VideoGenerationError) as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+
+@cli.command("preview-frame")
+@click.option("--output", "-o", type=click.Path(), help="Output image file (default: output/preview.png)")
+@click.option("--title", "-t", default="Sample Title Text", help="Title text to preview")
+@click.option("--background", "-bg", type=click.Path(exists=True), help="Background image (default: templates/background.png)")
+@click.option("--icon", type=click.Path(exists=True), help="Logo image (default: templates/logo.png)")
+@click.option("--video-config", type=click.Path(exists=True), help="Video layout config YAML (default: templates/video_config.yaml)")
+@click.option("--width", default=1920, type=int, help="Frame width (default: 1920)")
+@click.option("--height", default=1080, type=int, help="Frame height (default: 1080)")
+@click.option("--waveform-width", default=960, type=int, help="Waveform width (default: 960)")
+@click.option("--waveform-height", default=200, type=int, help="Waveform height (default: 200)")
+@click.option("--waveform-color", default="240,240,240", help="Waveform color as R,G,B (default: 240,240,240)")
+@click.option("--bg-color", default="20,20,30", help="Background color as R,G,B (default: 20,20,30)")
+@click.option("--open/--no-open", default=True, help="Auto-open preview after generation (default: --open)")
+@click.pass_context
+def preview_frame_cmd(ctx, output, title, background, icon, video_config, width, height, waveform_width, waveform_height, waveform_color, bg_color, open):
+    """Generate a single preview frame to check layout before rendering video."""
+    config = ctx.obj["config"]
+
+    # Parse colors
+    waveform_color_tuple = parse_color(waveform_color)
+    bg_color_tuple = parse_color(bg_color)
+
+    # Resolve background image path
+    if background:
+        background_path = Path(background)
+    else:
+        default_bg = Path("templates/background.png")
+        placeholder_bg = Path("templates/background_placeholder.png")
+        if default_bg.exists():
+            background_path = default_bg
+        elif placeholder_bg.exists():
+            background_path = placeholder_bg
+        else:
+            background_path = None
+
+    # Resolve icon/logo image path
+    if icon:
+        icon_path = Path(icon)
+    else:
+        default_logo = Path("templates/logo.png")
+        placeholder_logo = Path("templates/logo_placeholder.png")
+        if default_logo.exists():
+            icon_path = default_logo
+        elif placeholder_logo.exists():
+            icon_path = placeholder_logo
+        else:
+            icon_path = None
+
+    # Resolve video config path
+    if video_config:
+        video_config_path = Path(video_config)
+        click.echo(f"Using video config: {video_config_path}")
+    else:
+        default_config = Path("templates/video_config.yaml")
+        if default_config.exists():
+            video_config_path = default_config
+            click.echo(f"Using video config: {video_config_path}")
+        else:
+            video_config_path = None
+
+    # Determine output path
+    if output:
+        output_path = Path(output)
+    else:
+        output_dir = Path(config["local"]["output_dir"])
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / "preview.png"
+
+    click.echo(f"Generating preview frame...")
+
+    try:
+        result = generate_preview_frame(
+            output_path=output_path,
+            title=title,
+            background_path=background_path,
+            icon_path=icon_path,
+            width=width,
+            height=height,
+            waveform_width=waveform_width,
+            waveform_height=waveform_height,
+            waveform_color=waveform_color_tuple,
+            bg_color=bg_color_tuple,
+            video_config_path=video_config_path,
+        )
+        click.echo(f"Preview saved to: {result}")
+
+        # Auto-open the preview
+        if open:
+            import subprocess
+            subprocess.run(["open", str(result)], check=False)
+
+    except VideoGenerationError as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
 

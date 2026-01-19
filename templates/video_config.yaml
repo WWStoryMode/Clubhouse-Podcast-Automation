@@ -10,8 +10,10 @@ title:
   x: center          # "center" or pixel value from left
   y: auto            # "auto" (below logo) or pixel value from top
   font_size: 48
+  font: ~            # null = auto-detect, or path to .ttf/.ttc file
+  bold: false        # use bold font weight
   color: [255, 255, 255]
-  max_width: 1720    # max width before wrapping
+  max_width: 1760    # max width before wrapping (80px margin each side)
 
 waveform:
   x: center          # "center" or pixel value from left
@@ -19,3 +21,9 @@ waveform:
   width: 960
   height: 200
   color: [240, 240, 240]
+
+# Available system fonts (macOS):
+#   /System/Library/Fonts/PingFang.ttc        - PingFang (Chinese support)
+#   /System/Library/Fonts/STHeiti Light.ttc   - Heiti (Chinese)
+#   /System/Library/Fonts/Helvetica.ttc       - Helvetica
+#   /Library/Fonts/Arial Bold.ttf             - Arial Bold
