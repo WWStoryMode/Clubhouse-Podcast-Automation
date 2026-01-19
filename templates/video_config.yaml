@@ -1,0 +1,21 @@
+# Default video layout configuration
+# All positions are in pixels from top-left corner
+
+logo:
+  x: center          # "center" or pixel value from left
+  y: 150             # pixels from top
+  size: 200          # width and height (square)
+
+title:
+  x: center          # "center" or pixel value from left
+  y: auto            # "auto" (below logo) or pixel value from top
+  font_size: 48
+  color: [255, 255, 255]
+  max_width: 1720    # max width before wrapping
+
+waveform:
+  x: center          # "center" or pixel value from left
+  y: center_offset   # "center", "center_offset" (+50px), or pixel value
+  width: 960
+  height: 200
+  color: [240, 240, 240]

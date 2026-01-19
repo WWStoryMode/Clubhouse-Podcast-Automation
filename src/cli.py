@@ -244,14 +244,15 @@ def parse_color(color_str: str) -> tuple:
 @click.option("--input", "-i", "input_path", type=click.Path(exists=True), help="Input audio file")
 @click.option("--output", "-o", type=click.Path(), help="Output video file")
 @click.option("--title", "-t", default="", help="Title text to display on video")
-@click.option("--background", "-bg", type=click.Path(exists=True), help="Background image path")
-@click.option("--icon", type=click.Path(exists=True), help="Icon/logo image path")
+@click.option("--background", "-bg", type=click.Path(exists=True), help="Background image (default: templates/background.png)")
+@click.option("--icon", type=click.Path(exists=True), help="Logo image (default: templates/logo.png)")
+@click.option("--video-config", type=click.Path(exists=True), help="Video layout config YAML (default: templates/video_config.yaml)")
 @click.option("--width", default=1920, type=int, help="Video width (default: 1920)")
 @click.option("--height", default=1080, type=int, help="Video height (default: 1080)")
 @click.option("--fps", default=30, type=int, help="Frames per second (default: 30)")
 @click.option("--waveform-width", default=960, type=int, help="Waveform width (default: 960)")
 @click.option("--waveform-height", default=200, type=int, help="Waveform height (default: 200)")
-@click.option("--waveform-color", default="0,200,255", help="Waveform color as R,G,B (default: 0,200,255)")
+@click.option("--waveform-color", default="240,240,240", help="Waveform color as R,G,B (default: 240,240,240)")
 @click.option("--bg-color", default="20,20,30", help="Background color as R,G,B (default: 20,20,30)")
 @click.option("--compact", is_flag=True, help="Use compact encoding (smaller file, slower encoding)")
 @click.option("--encoder", "-e", default="auto",
@@ -259,7 +260,7 @@ def parse_color(color_str: str) -> tuple:
               help="Video encoder (default: auto-detect)")
 @click.option("--list-encoders", is_flag=True, help="List available encoders and exit")
 @click.pass_context
-def generate_video_cmd(ctx, input_path, output, title, background, icon, width, height, fps, waveform_width, waveform_height, waveform_color, bg_color, compact, encoder, list_encoders):
+def generate_video_cmd(ctx, input_path, output, title, background, icon, video_config, width, height, fps, waveform_width, waveform_height, waveform_color, bg_color, compact, encoder, list_encoders):
     """Generate video with waveform visualization from audio using ffmpeg."""
     # Handle --list-encoders
     if list_encoders:
@@ -279,6 +280,50 @@ def generate_video_cmd(ctx, input_path, output, title, background, icon, width, 
     # Parse colors
     waveform_color_tuple = parse_color(waveform_color)
     bg_color_tuple = parse_color(bg_color)
+
+    # Resolve background image path
+    if background:
+        background_path = Path(background)
+    else:
+        # Check for default background.png, fall back to placeholder
+        default_bg = Path("templates/background.png")
+        placeholder_bg = Path("templates/background_placeholder.png")
+        if default_bg.exists():
+            background_path = default_bg
+            click.echo(f"Using background: {default_bg}")
+        elif placeholder_bg.exists():
+            background_path = placeholder_bg
+            click.echo(f"Note: templates/background.png not found, using placeholder")
+        else:
+            background_path = None
+
+    # Resolve icon/logo image path
+    if icon:
+        icon_path = Path(icon)
+    else:
+        # Check for default logo.png, fall back to placeholder
+        default_logo = Path("templates/logo.png")
+        placeholder_logo = Path("templates/logo_placeholder.png")
+        if default_logo.exists():
+            icon_path = default_logo
+            click.echo(f"Using logo: {default_logo}")
+        elif placeholder_logo.exists():
+            icon_path = placeholder_logo
+            click.echo(f"Note: templates/logo.png not found, using placeholder")
+        else:
+            icon_path = None
+
+    # Resolve video config path
+    if video_config:
+        video_config_path = Path(video_config)
+        click.echo(f"Using video config: {video_config_path}")
+    else:
+        # Check for default video_config.yaml
+        default_config = Path("templates/video_config.yaml")
+        if default_config.exists():
+            video_config_path = default_config
+        else:
+            video_config_path = None
 
     # Determine output path
     if output:
@@ -300,8 +345,8 @@ def generate_video_cmd(ctx, input_path, output, title, background, icon, width, 
             audio_path=Path(input_path),
             output_path=output_path,
             title=title,
-            background_path=Path(background) if background else None,
-            icon_path=Path(icon) if icon else None,
+            background_path=background_path,
+            icon_path=icon_path,
             width=width,
             height=height,
             fps=fps,
@@ -311,6 +356,7 @@ def generate_video_cmd(ctx, input_path, output, title, background, icon, width, 
             bg_color=bg_color_tuple,
             compact=compact,
             encoder=encoder,
+            video_config_path=video_config_path,
             show_progress=True,
         )
         click.echo(f"Video saved to: {result}")

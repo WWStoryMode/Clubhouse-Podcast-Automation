@@ -4,8 +4,9 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Optional, Tuple, List, Dict
+from typing import Optional, Tuple, List, Dict, Any
 
+import yaml
 from PIL import Image, ImageDraw, ImageFont
 
 
@@ -47,6 +48,77 @@ ENCODERS: Dict[str, Dict] = {
         "extra_args": [],
     },
 }
+
+
+# Default layout configuration
+DEFAULT_LAYOUT = {
+    "logo": {
+        "x": "center",
+        "y": 150,
+        "size": 200,
+    },
+    "title": {
+        "x": "center",
+        "y": "auto",
+        "font_size": 48,
+        "color": [255, 255, 255],
+        "max_width": 1720,
+    },
+    "waveform": {
+        "x": "center",
+        "y": "center_offset",
+        "width": 960,
+        "height": 200,
+        "color": [240, 240, 240],
+    },
+}
+
+
+def load_video_config(config_path: Optional[Path] = None) -> Dict[str, Any]:
+    """
+    Load video layout configuration from YAML file.
+
+    Args:
+        config_path: Path to config file. If None, uses default layout.
+
+    Returns:
+        Configuration dictionary
+    """
+    config = DEFAULT_LAYOUT.copy()
+
+    if config_path and Path(config_path).exists():
+        with open(config_path) as f:
+            user_config = yaml.safe_load(f)
+
+        # Deep merge user config into defaults
+        for section in ["logo", "title", "waveform"]:
+            if section in user_config:
+                if section not in config:
+                    config[section] = {}
+                config[section] = {**DEFAULT_LAYOUT.get(section, {}), **user_config[section]}
+
+    return config
+
+
+def resolve_position(value: Any, dimension: int, element_size: int = 0) -> int:
+    """
+    Resolve position value to pixels.
+
+    Args:
+        value: Position value ("center", "center_offset", "auto", or int)
+        dimension: Total dimension (width or height)
+        element_size: Size of element being positioned
+
+    Returns:
+        Position in pixels
+    """
+    if isinstance(value, int):
+        return value
+    if value == "center":
+        return (dimension - element_size) // 2
+    if value == "center_offset":
+        return (dimension - element_size) // 2 + 50
+    return 0  # Default fallback
 
 
 def get_available_encoders(ffmpeg_path: str = "ffmpeg") -> List[str]:
@@ -165,6 +237,8 @@ def create_base_image(
     icon_path: Optional[Path] = None,
     title: str = "",
     bg_color: Tuple[int, int, int] = (20, 20, 30),
+    layout_config: Optional[Dict[str, Any]] = None,
+    # Legacy parameters (used if no config provided)
     icon_size: Tuple[int, int] = (200, 200),
     icon_y_position: int = 150,
     title_font_size: int = 48,
@@ -181,15 +255,37 @@ def create_base_image(
         icon_path: Optional path to icon/logo image
         title: Title text to display
         bg_color: Fallback background color (RGB)
+        layout_config: Layout configuration dict (overrides legacy params)
         icon_size: Size to scale icon to (width, height)
         icon_y_position: Y position for icon (centered horizontally)
         title_font_size: Font size for title
         title_color: Color for title text (RGB)
-        title_y_position: Y position for title (default: near bottom)
+        title_y_position: Y position for title (default: below logo)
 
     Returns:
         PIL Image with all static elements composited
     """
+    # Use config if provided, otherwise use legacy parameters
+    if layout_config:
+        logo_cfg = layout_config.get("logo", {})
+        title_cfg = layout_config.get("title", {})
+
+        logo_size = logo_cfg.get("size", 200)
+        icon_size = (logo_size, logo_size)
+        icon_x_cfg = logo_cfg.get("x", "center")
+        icon_y_position = logo_cfg.get("y", 150)
+
+        title_font_size = title_cfg.get("font_size", 48)
+        title_color = tuple(title_cfg.get("color", [255, 255, 255]))
+        title_x_cfg = title_cfg.get("x", "center")
+        title_y_cfg = title_cfg.get("y", "auto")
+        title_max_width = title_cfg.get("max_width", width - 200)
+    else:
+        icon_x_cfg = "center"
+        title_x_cfg = "center"
+        title_y_cfg = "auto" if title_y_position is None else title_y_position
+        title_max_width = width - 200
+
     # Create or load background
     if background_path and Path(background_path).exists():
         bg = Image.open(background_path).convert('RGBA')
@@ -201,7 +297,13 @@ def create_base_image(
     if icon_path and Path(icon_path).exists():
         icon = Image.open(icon_path).convert('RGBA')
         icon = icon.resize(icon_size, Image.Resampling.LANCZOS)
-        icon_x = (width - icon_size[0]) // 2
+
+        # Resolve X position
+        if icon_x_cfg == "center":
+            icon_x = (width - icon_size[0]) // 2
+        else:
+            icon_x = int(icon_x_cfg)
+
         bg.paste(icon, (icon_x, icon_y_position), icon)
 
     # Add title if provided
@@ -225,19 +327,21 @@ def create_base_image(
         if font is None:
             font = ImageFont.load_default()
 
-        # Calculate title position
-        if title_y_position is None:
-            title_y_position = height - 150
+        # Calculate title Y position
+        if title_y_cfg == "auto":
+            # Position below logo with padding
+            actual_title_y = icon_y_position + icon_size[1] + 40
+        else:
+            actual_title_y = int(title_y_cfg)
 
         # Word wrap for title
-        max_width = width - 200
         lines = []
         current_line = ""
 
         for char in title:
             test_line = current_line + char
             bbox = draw.textbbox((0, 0), test_line, font=font)
-            if bbox[2] - bbox[0] <= max_width:
+            if bbox[2] - bbox[0] <= title_max_width:
                 current_line = test_line
             else:
                 if current_line:
@@ -247,12 +351,18 @@ def create_base_image(
         if current_line:
             lines.append(current_line)
 
-        # Draw each line centered
-        y = title_y_position
+        # Draw each line
+        y = actual_title_y
         for line in lines:
             bbox = draw.textbbox((0, 0), line, font=font)
             line_width = bbox[2] - bbox[0]
-            x = (width - line_width) // 2
+
+            # Resolve X position
+            if title_x_cfg == "center":
+                x = (width - line_width) // 2
+            else:
+                x = int(title_x_cfg)
+
             draw.text((x, y), line, font=font, fill=title_color)
             y += bbox[3] - bbox[1] + 10
 
@@ -273,13 +383,14 @@ def generate_video(
     width: int = 1920,
     height: int = 1080,
     fps: int = 30,
-    waveform_color: Tuple[int, int, int] = (0, 200, 255),
+    waveform_color: Tuple[int, int, int] = (240, 240, 240),
     waveform_width: int = 960,
     waveform_height: int = 200,
     bg_color: Tuple[int, int, int] = (20, 20, 30),
     icon_size: Tuple[int, int] = (200, 200),
     compact: bool = False,
     encoder: str = "auto",
+    video_config_path: Optional[Path] = None,
     show_progress: bool = True,
     ffmpeg_path: str = "ffmpeg",
     ffprobe_path: str = "ffprobe",
@@ -306,6 +417,7 @@ def generate_video(
         icon_size: Size for icon/logo
         compact: Use compact encoding (smaller file, slower encoding)
         encoder: Encoder to use (auto, cpu, videotoolbox, nvenc, vaapi, qsv, amf)
+        video_config_path: Path to video layout config YAML file
         show_progress: Whether to show progress
         ffmpeg_path: Path to ffmpeg executable
         ffprobe_path: Path to ffprobe executable
@@ -331,6 +443,19 @@ def generate_video(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
+        # Load video config if provided
+        layout_config = load_video_config(video_config_path)
+
+        if video_config_path and show_progress:
+            print(f"Using video config: {video_config_path}")
+
+        # Get waveform settings from config or parameters
+        waveform_cfg = layout_config.get("waveform", {})
+        if video_config_path:
+            waveform_width = waveform_cfg.get("width", waveform_width)
+            waveform_height = waveform_cfg.get("height", waveform_height)
+            waveform_color = tuple(waveform_cfg.get("color", list(waveform_color)))
+
         # Get audio duration
         if show_progress:
             print("Getting audio duration...")
@@ -350,6 +475,7 @@ def generate_video(
             icon_path=icon_path,
             title=title,
             bg_color=bg_color,
+            layout_config=layout_config if video_config_path else None,
             icon_size=icon_size,
         )
 
@@ -365,9 +491,21 @@ def generate_video(
         # Build ffmpeg filter complex
         waveform_color_hex = rgb_to_hex(waveform_color)
 
-        # Calculate waveform position (centered, slightly below middle)
-        wave_x = (width - waveform_width) // 2
-        wave_y = (height - waveform_height) // 2 + 50
+        # Calculate waveform position from config or default
+        wave_x_cfg = waveform_cfg.get("x", "center")
+        wave_y_cfg = waveform_cfg.get("y", "center_offset")
+
+        if wave_x_cfg == "center":
+            wave_x = (width - waveform_width) // 2
+        else:
+            wave_x = int(wave_x_cfg)
+
+        if wave_y_cfg == "center":
+            wave_y = (height - waveform_height) // 2
+        elif wave_y_cfg == "center_offset":
+            wave_y = (height - waveform_height) // 2 + 50
+        else:
+            wave_y = int(wave_y_cfg)
 
         filter_complex = (
             f"[1:v]loop=loop=-1:size=1:start=0,trim=duration={duration},fps={fps}[bg];"

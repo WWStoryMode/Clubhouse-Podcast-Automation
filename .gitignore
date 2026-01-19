@@ -2,6 +2,10 @@
 config/config.yaml
 .env
 
+# Custom video configs (keep defaults, ignore custom)
+templates/video_config_*.yaml
+!templates/video_config.yaml
+
 # Credentials
 credentials/
 *.json
