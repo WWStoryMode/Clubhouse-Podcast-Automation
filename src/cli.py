@@ -14,6 +14,7 @@ from .core.audio_extractor import extract_audio, AudioExtractionError
 from .core.transcriber import transcribe_audio, transcribe_audio_chunked, TranscriptionError
 from .core.summarizer import generate_descriptions, SummaryError
 from .core.video_generator import generate_video, generate_preview_frame, VideoGenerationError, get_available_encoders
+from .core.youtube_uploader import upload_video as youtube_upload, load_metadata_from_yaml, YouTubeUploadError
 
 
 # Load environment variables
@@ -457,6 +458,69 @@ def preview_frame_cmd(ctx, output, title, background, icon, video_config, width,
             subprocess.run(["open", str(result)], check=False)
 
     except VideoGenerationError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+
+@cli.command("upload-youtube")
+@click.option("--video", "-v", "video_path", required=True, type=click.Path(exists=True), help="Video file to upload")
+@click.option("--title", "-t", help="Video title (or use --metadata)")
+@click.option("--description", "-d", default="", help="Video description")
+@click.option("--tags", help="Comma-separated tags (e.g., 'tag1,tag2,tag3')")
+@click.option("--metadata", "-m", type=click.Path(exists=True), help="Load title/description/tags from descriptions YAML")
+@click.option("--privacy", default="private", type=click.Choice(["private", "unlisted", "public"]), help="Privacy setting (default: private)")
+@click.option("--category", default="22", help="YouTube category ID (default: 22 = People & Blogs)")
+@click.option("--credentials", type=click.Path(exists=True), help="Path to OAuth client_secret.json (default: credentials/client_secret.json)")
+@click.pass_context
+def upload_youtube_cmd(ctx, video_path, title, description, tags, metadata, privacy, category, credentials):
+    """Upload video to YouTube."""
+    # Load metadata from YAML if provided
+    if metadata:
+        click.echo(f"Loading metadata from: {metadata}")
+        try:
+            meta = load_metadata_from_yaml(Path(metadata))
+            if not title:
+                title = meta.get("title", "")
+            if not description:
+                description = meta.get("description", "")
+            if not tags:
+                tags = ",".join(meta.get("tags", []))
+        except YouTubeUploadError as e:
+            click.echo(f"Error loading metadata: {e}", err=True)
+            sys.exit(1)
+
+    # Require title
+    if not title:
+        click.echo("Error: --title is required (or use --metadata with a descriptions YAML)", err=True)
+        sys.exit(1)
+
+    # Parse tags
+    tag_list = [t.strip() for t in tags.split(",")] if tags else []
+
+    # Resolve credentials path
+    credentials_path = Path(credentials) if credentials else Path("credentials/client_secret.json")
+
+    click.echo(f"Uploading to YouTube: {video_path}")
+    click.echo(f"Title: {title}")
+    click.echo(f"Privacy: {privacy}")
+    if tag_list:
+        click.echo(f"Tags: {', '.join(tag_list)}")
+
+    try:
+        result = youtube_upload(
+            video_path=Path(video_path),
+            title=title,
+            description=description,
+            tags=tag_list,
+            category_id=category,
+            privacy=privacy,
+            client_secrets_path=credentials_path,
+            show_progress=True,
+        )
+        click.echo(f"\nSuccess! Video uploaded:")
+        click.echo(f"  URL: {result['url']}")
+        click.echo(f"  Video ID: {result['video_id']}")
+    except (FileNotFoundError, YouTubeUploadError) as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
 
