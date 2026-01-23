@@ -95,13 +95,22 @@ def download(ctx, url, output, filename):
 @cli.command()
 @click.option("--input", "-i", "input_path", required=True, type=click.Path(exists=True), help="Input video file")
 @click.option("--output", "-o", type=click.Path(), help="Output audio file")
+@click.option("--trim-start", "-ss", help="Start time for trimming (HH:MM:SS, MM:SS, or seconds)")
+@click.option("--trim-end", "-to", help="End time for trimming (HH:MM:SS, MM:SS, or seconds)")
 @click.pass_context
-def extract(ctx, input_path, output):
-    """Extract audio from video file."""
+def extract(ctx, input_path, output, trim_start, trim_end):
+    """Extract audio from video file with optional trimming."""
     config = ctx.obj["config"]
     ffmpeg_path = config["local"].get("ffmpeg_path", "ffmpeg")
 
     click.echo(f"Extracting audio from: {input_path}")
+    if trim_start or trim_end:
+        trim_info = []
+        if trim_start:
+            trim_info.append(f"start={trim_start}")
+        if trim_end:
+            trim_info.append(f"end={trim_end}")
+        click.echo(f"Trimming: {', '.join(trim_info)}")
 
     try:
         output_path = Path(output) if output else None
@@ -110,6 +119,8 @@ def extract(ctx, input_path, output):
             output_path=output_path,
             ffmpeg_path=ffmpeg_path,
             overwrite=True,
+            trim_start=trim_start,
+            trim_end=trim_end,
         )
         click.echo(f"Extracted to: {result}")
     except (FileNotFoundError, AudioExtractionError) as e:

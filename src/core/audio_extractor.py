@@ -73,6 +73,44 @@ def get_audio_duration(audio_path: Path, ffmpeg_path: str = "ffmpeg") -> float:
         raise AudioExtractionError(f"Failed to get audio duration: {e}")
 
 
+def parse_timestamp(timestamp: str) -> str:
+    """
+    Parse and validate a timestamp string.
+
+    Accepts formats:
+    - HH:MM:SS (e.g., "01:30:00")
+    - MM:SS (e.g., "05:30")
+    - SS (e.g., "90" for 90 seconds)
+
+    Args:
+        timestamp: Timestamp string
+
+    Returns:
+        Normalized timestamp string for ffmpeg
+
+    Raises:
+        ValueError: If timestamp format is invalid
+    """
+    if not timestamp:
+        raise ValueError("Empty timestamp")
+
+    parts = timestamp.split(":")
+    if len(parts) == 1:
+        # Just seconds
+        seconds = float(parts[0])
+        return str(seconds)
+    elif len(parts) == 2:
+        # MM:SS
+        minutes, seconds = int(parts[0]), float(parts[1])
+        return f"{minutes}:{seconds:05.2f}"
+    elif len(parts) == 3:
+        # HH:MM:SS
+        hours, minutes, seconds = int(parts[0]), int(parts[1]), float(parts[2])
+        return f"{hours}:{minutes:02d}:{seconds:05.2f}"
+    else:
+        raise ValueError(f"Invalid timestamp format: {timestamp}")
+
+
 def extract_audio(
     video_path: Path,
     output_path: Optional[Path] = None,
@@ -80,6 +118,8 @@ def extract_audio(
     audio_codec: str = "libmp3lame",
     audio_quality: str = "2",
     overwrite: bool = False,
+    trim_start: Optional[str] = None,
+    trim_end: Optional[str] = None,
 ) -> Path:
     """
     Extract audio track from video file to MP3 using ffmpeg.
@@ -92,6 +132,8 @@ def extract_audio(
         audio_codec: Audio codec to use (default: libmp3lame for MP3)
         audio_quality: Audio quality setting (0-9, lower is better)
         overwrite: Whether to overwrite existing output file
+        trim_start: Start time for trimming (HH:MM:SS, MM:SS, or seconds)
+        trim_end: End time for trimming (HH:MM:SS, MM:SS, or seconds)
 
     Returns:
         Path to extracted MP3 file
@@ -133,15 +175,35 @@ def extract_audio(
         )
 
     # Build ffmpeg command
-    cmd = [
-        ffmpeg_path,
-        "-i", str(video_path),      # Input file
+    cmd = [ffmpeg_path]
+
+    # Input file
+    cmd.extend(["-i", str(video_path)])
+
+    # Add trim start (after input for accurate seeking)
+    if trim_start:
+        try:
+            start_time = parse_timestamp(trim_start)
+            cmd.extend(["-ss", start_time])
+        except ValueError as e:
+            raise AudioExtractionError(f"Invalid trim_start format: {e}")
+
+    # Add trim end (after input)
+    if trim_end:
+        try:
+            end_time = parse_timestamp(trim_end)
+            cmd.extend(["-to", end_time])
+        except ValueError as e:
+            raise AudioExtractionError(f"Invalid trim_end format: {e}")
+
+    # Audio settings
+    cmd.extend([
         "-vn",                       # No video
         "-acodec", audio_codec,      # Audio codec
         "-q:a", audio_quality,       # Audio quality
         "-y" if overwrite else "-n", # Overwrite flag
         str(output_path),            # Output file
-    ]
+    ])
 
     try:
         result = subprocess.run(
