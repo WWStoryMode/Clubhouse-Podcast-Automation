@@ -120,6 +120,7 @@ def extract_audio(
     overwrite: bool = False,
     trim_start: Optional[str] = None,
     trim_end: Optional[str] = None,
+    normalize: bool = True,
 ) -> Path:
     """
     Extract audio track from video file to MP3 using ffmpeg.
@@ -134,6 +135,7 @@ def extract_audio(
         overwrite: Whether to overwrite existing output file
         trim_start: Start time for trimming (HH:MM:SS, MM:SS, or seconds)
         trim_end: End time for trimming (HH:MM:SS, MM:SS, or seconds)
+        normalize: Apply loudnorm filter for consistent audio levels (default: True)
 
     Returns:
         Path to extracted MP3 file
@@ -196,10 +198,15 @@ def extract_audio(
         except ValueError as e:
             raise AudioExtractionError(f"Invalid trim_end format: {e}")
 
+    # Add loudnorm filter for audio normalization
+    if normalize:
+        cmd.extend(["-af", "loudnorm=I=-16:TP=-3:LRA=11"])
+
     # Audio settings
     cmd.extend([
         "-vn",                       # No video
         "-acodec", audio_codec,      # Audio codec
+        "-ar", "44100",              # Sample rate (required for loudnorm)
         "-q:a", audio_quality,       # Audio quality
         "-y" if overwrite else "-n", # Overwrite flag
         str(output_path),            # Output file

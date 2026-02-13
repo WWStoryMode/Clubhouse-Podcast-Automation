@@ -97,9 +97,10 @@ def download(ctx, url, output, filename):
 @click.option("--output", "-o", type=click.Path(), help="Output audio file")
 @click.option("--trim-start", "-ss", help="Start time for trimming (HH:MM:SS, MM:SS, or seconds)")
 @click.option("--trim-end", "-to", help="End time for trimming (HH:MM:SS, MM:SS, or seconds)")
+@click.option("--normalize/--no-normalize", default=True, help="Apply loudnorm filter for consistent audio levels (default: --normalize)")
 @click.pass_context
-def extract(ctx, input_path, output, trim_start, trim_end):
-    """Extract audio from video file with optional trimming."""
+def extract(ctx, input_path, output, trim_start, trim_end, normalize):
+    """Extract audio from video file with optional trimming and normalization."""
     config = ctx.obj["config"]
     ffmpeg_path = config["local"].get("ffmpeg_path", "ffmpeg")
 
@@ -111,6 +112,8 @@ def extract(ctx, input_path, output, trim_start, trim_end):
         if trim_end:
             trim_info.append(f"end={trim_end}")
         click.echo(f"Trimming: {', '.join(trim_info)}")
+    if normalize:
+        click.echo("Normalizing audio levels (loudnorm)")
 
     try:
         output_path = Path(output) if output else None
@@ -121,6 +124,7 @@ def extract(ctx, input_path, output, trim_start, trim_end):
             overwrite=True,
             trim_start=trim_start,
             trim_end=trim_end,
+            normalize=normalize,
         )
         click.echo(f"Extracted to: {result}")
     except (FileNotFoundError, AudioExtractionError) as e:
@@ -135,7 +139,8 @@ def extract(ctx, input_path, output, trim_start, trim_end):
 @click.option("--timestamps", "-t", is_flag=True, help="Include timestamps in transcript")
 @click.option("--chunked", is_flag=True, help="Use chunked transcription for long audio files")
 @click.option("--chunk-minutes", default=10, type=int, help="Chunk duration in minutes (default: 10)")
-@click.option("--model", "-m", default="gemini-2.5-flash", help="Gemini model to use (default: gemini-2.5-flash)")
+@click.option("--model", "-m", default="gemini-2.5-flash",
+              help="Gemini model: gemini-2.5-flash (default), gemini-2.5-pro, gemini-2.0-flash, gemini-3-pro-preview")
 @click.pass_context
 def transcribe(ctx, input_path, output, language, timestamps, chunked, chunk_minutes, model):
     """Transcribe audio file using Gemini API."""
