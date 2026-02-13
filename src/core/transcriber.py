@@ -7,7 +7,8 @@ import time
 from pathlib import Path
 from typing import Optional, List
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 
 class TranscriptionError(Exception):
@@ -16,12 +17,15 @@ class TranscriptionError(Exception):
     pass
 
 
-def configure_gemini(api_key: Optional[str] = None) -> None:
+def get_gemini_client(api_key: Optional[str] = None) -> genai.Client:
     """
-    Configure the Gemini API with the provided key.
+    Create a Gemini API client.
 
     Args:
         api_key: Gemini API key. If None, reads from GEMINI_API_KEY env var.
+
+    Returns:
+        Configured Gemini client
 
     Raises:
         TranscriptionError: If no API key is provided or found.
@@ -34,7 +38,7 @@ def configure_gemini(api_key: Optional[str] = None) -> None:
             "Set GEMINI_API_KEY environment variable or pass api_key parameter."
         )
 
-    genai.configure(api_key=key)
+    return genai.Client(api_key=key)
 
 
 def transcribe_audio(
@@ -69,9 +73,6 @@ def transcribe_audio(
 
     if not audio_path.is_file():
         raise FileNotFoundError(f"Path is not a file: {audio_path}")
-
-    # Configure API
-    configure_gemini(api_key)
 
     # Map language codes to human-readable descriptions
     language_map = {
@@ -141,15 +142,17 @@ Instructions:
 - Provide only the transcript text, no timestamps or additional commentary"""
 
     try:
+        # Create client
+        client = get_gemini_client(api_key)
+
         # Upload the audio file
-        audio_file = genai.upload_file(str(audio_path))
+        audio_file = client.files.upload(file=str(audio_path))
 
-        # Create the model and generate transcription
-        model = genai.GenerativeModel(model_name)
-
-        response = model.generate_content(
-            [prompt, audio_file],
-            generation_config=genai.GenerationConfig(
+        # Generate transcription
+        response = client.models.generate_content(
+            model=model_name,
+            contents=[prompt, audio_file],
+            config=types.GenerateContentConfig(
                 temperature=0.1,  # Low temperature for accuracy
                 max_output_tokens=8192,
             ),
@@ -157,7 +160,7 @@ Instructions:
 
         # Clean up uploaded file
         try:
-            audio_file.delete()
+            client.files.delete(name=audio_file.name)
         except Exception:
             pass  # Ignore cleanup errors
 
@@ -344,28 +347,41 @@ def transcribe_audio_chunked(
             # Calculate chunk start time for timestamp adjustment
             chunk_start_minutes = i * chunk_duration_minutes
 
-            try:
-                transcript = transcribe_audio(
-                    audio_path=chunk_path,
-                    api_key=api_key,
-                    language=language,
-                    include_timestamps=include_timestamps,
-                    model_name=model_name,
-                )
+            max_retries = 3
+            last_error = None
+            for attempt in range(max_retries):
+                try:
+                    transcript = transcribe_audio(
+                        audio_path=chunk_path,
+                        api_key=api_key,
+                        language=language,
+                        include_timestamps=include_timestamps,
+                        model_name=model_name,
+                    )
 
-                # Add chunk marker with time offset if using timestamps
-                if include_timestamps and chunk_start_minutes > 0:
-                    transcript = f"[Chunk {i+1} - starts at {chunk_start_minutes}:00]\n{transcript}"
+                    # Add chunk marker with time offset if using timestamps
+                    if include_timestamps and chunk_start_minutes > 0:
+                        transcript = f"[Chunk {i+1} - starts at {chunk_start_minutes}:00]\n{transcript}"
 
-                transcripts.append(transcript)
+                    transcripts.append(transcript)
 
-                if show_progress:
-                    print(f"  Chunk {i+1} completed ({len(transcript)} chars)")
+                    if show_progress:
+                        print(f"  Chunk {i+1} completed ({len(transcript)} chars)")
 
-            except TranscriptionError as e:
-                if show_progress:
-                    print(f"  Chunk {i+1} failed: {e}")
-                transcripts.append(f"[Transcription failed for chunk {i+1}]")
+                    break  # Success, exit retry loop
+
+                except TranscriptionError as e:
+                    last_error = e
+                    if attempt < max_retries - 1:
+                        wait_time = 2 ** attempt * 5  # 5s, 10s, 20s
+                        if show_progress:
+                            print(f"  Chunk {i+1} attempt {attempt+1} failed: {e}")
+                            print(f"  Retrying in {wait_time}s...")
+                        time.sleep(wait_time)
+                    else:
+                        if show_progress:
+                            print(f"  Chunk {i+1} failed after {max_retries} attempts: {last_error}")
+                        transcripts.append(f"[Transcription failed for chunk {i+1}]")
 
             # Rate limiting delay between chunks
             if i < len(chunks) - 1 and delay_between_chunks > 0:
