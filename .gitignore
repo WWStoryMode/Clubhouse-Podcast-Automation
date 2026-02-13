@@ -12,11 +12,8 @@ credentials/
 !config/*.example.json
 
 # Output files
-output/audio/*
-output/transcripts/*
-output/descriptions/*
-output/videos/*
-!output/**/.gitkeep
+output/**
+!output/.gitkeep
 
 # Python
 __pycache__/
