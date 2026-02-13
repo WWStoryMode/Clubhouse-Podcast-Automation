@@ -1,11 +1,13 @@
 """Transcribe audio using Gemini API."""
 
 import os
+import re
 import subprocess
 import tempfile
 import time
+from collections import Counter
 from pathlib import Path
-from typing import Optional, List
+from typing import List, Optional, Tuple
 
 from google import genai
 from google.genai import types
@@ -271,6 +273,77 @@ def split_audio(
     return chunks
 
 
+def validate_transcript_quality(
+    transcript: str,
+    chunk_duration_seconds: float,
+    is_final_chunk: bool = False,
+) -> Tuple[bool, str]:
+    """
+    Validate transcript quality to detect common Gemini hallucination issues.
+
+    Args:
+        transcript: The transcript text to validate.
+        chunk_duration_seconds: Duration of the audio chunk in seconds.
+        is_final_chunk: Whether this is the last chunk (relaxed thresholds).
+
+    Returns:
+        Tuple of (is_valid, reason). reason is empty string if valid.
+    """
+    stripped = transcript.strip()
+
+    # Check 1: Empty or near-empty
+    if not stripped or len(stripped) < 20:
+        return False, f"Transcript too short ({len(stripped)} chars)"
+
+    # Check 2: Abnormally short for chunk duration
+    chunk_minutes = chunk_duration_seconds / 60.0
+    min_chars_per_minute = 50
+    if is_final_chunk:
+        if chunk_minutes < 1.0:
+            # Skip length check for very short final chunks
+            pass
+        else:
+            # 50% relaxed threshold for final chunk
+            threshold = min_chars_per_minute * chunk_minutes * 0.5
+            if len(stripped) < threshold:
+                return False, (
+                    f"Transcript too short for duration: {len(stripped)} chars "
+                    f"for {chunk_minutes:.1f} min (minimum {threshold:.0f})"
+                )
+    else:
+        threshold = min_chars_per_minute * chunk_minutes
+        if len(stripped) < threshold:
+            return False, (
+                f"Transcript too short for duration: {len(stripped)} chars "
+                f"for {chunk_minutes:.1f} min (minimum {threshold:.0f})"
+            )
+
+    # Check 3a: Repeated sentence detection
+    sentences = [s.strip() for s in re.split(r'[.!?。！？\n]+', stripped) if len(s.strip()) > 10]
+    if sentences:
+        sentence_counts = Counter(sentences)
+        most_common_sentence, most_common_count = sentence_counts.most_common(1)[0]
+        if most_common_count >= 4 and most_common_count / len(sentences) > 0.4:
+            return False, (
+                f"Repeated sentence detected ({most_common_count}/{len(sentences)} sentences): "
+                f"'{most_common_sentence[:50]}...'"
+            )
+
+    # Check 3b: Character-pattern repetition (CJK fallback)
+    window_size = 20
+    if len(stripped) >= window_size:
+        windows = [stripped[j:j + window_size] for j in range(len(stripped) - window_size + 1)]
+        window_counts = Counter(windows)
+        most_common_window, most_common_count = window_counts.most_common(1)[0]
+        if most_common_count >= 5 and most_common_count / len(windows) > 0.3:
+            return False, (
+                f"Repeated character pattern detected ({most_common_count} times): "
+                f"'{most_common_window}'"
+            )
+
+    return True, ""
+
+
 def transcribe_audio_chunked(
     audio_path: Path,
     api_key: Optional[str] = None,
@@ -349,6 +422,8 @@ def transcribe_audio_chunked(
 
             max_retries = 3
             last_error = None
+            last_failed_transcript = None
+            is_final_chunk = i == len(chunks) - 1
             for attempt in range(max_retries):
                 try:
                     transcript = transcribe_audio(
@@ -358,6 +433,28 @@ def transcribe_audio_chunked(
                         include_timestamps=include_timestamps,
                         model_name=model_name,
                     )
+
+                    # Validate transcript quality before adding markers
+                    is_valid, reason = validate_transcript_quality(
+                        transcript,
+                        chunk_duration_seconds,
+                        is_final_chunk=is_final_chunk,
+                    )
+                    if not is_valid:
+                        last_failed_transcript = transcript
+                        if attempt < max_retries - 1:
+                            if show_progress:
+                                print(f"  Chunk {i+1} attempt {attempt+1} failed validation: {reason}")
+                                print(f"  Retrying...")
+                            continue
+                        else:
+                            # All retries exhausted — include best result with warning
+                            if show_progress:
+                                print(
+                                    f"  WARNING: Chunk {i+1} failed validation after "
+                                    f"{max_retries} attempts: {reason}. Including best result."
+                                )
+                            transcript = last_failed_transcript
 
                     # Add chunk marker with time offset if using timestamps
                     if include_timestamps and chunk_start_minutes > 0:
@@ -381,7 +478,10 @@ def transcribe_audio_chunked(
                     else:
                         if show_progress:
                             print(f"  Chunk {i+1} failed after {max_retries} attempts: {last_error}")
-                        transcripts.append(f"[Transcription failed for chunk {i+1}]")
+                        if last_failed_transcript:
+                            transcripts.append(last_failed_transcript)
+                        else:
+                            transcripts.append(f"[Transcription failed for chunk {i+1}]")
 
             # Rate limiting delay between chunks
             if i < len(chunks) - 1 and delay_between_chunks > 0:
