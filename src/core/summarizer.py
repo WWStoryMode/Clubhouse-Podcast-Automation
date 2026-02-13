@@ -3,7 +3,8 @@
 import os
 from typing import Optional, List
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 
 class SummaryError(Exception):
@@ -12,12 +13,15 @@ class SummaryError(Exception):
     pass
 
 
-def configure_gemini(api_key: Optional[str] = None) -> None:
+def get_gemini_client(api_key: Optional[str] = None) -> genai.Client:
     """
-    Configure the Gemini API with the provided key.
+    Create a Gemini API client.
 
     Args:
         api_key: Gemini API key. If None, reads from GEMINI_API_KEY env var.
+
+    Returns:
+        Configured Gemini client
 
     Raises:
         SummaryError: If no API key is provided or found.
@@ -30,7 +34,7 @@ def configure_gemini(api_key: Optional[str] = None) -> None:
             "Set GEMINI_API_KEY environment variable or pass api_key parameter."
         )
 
-    genai.configure(api_key=key)
+    return genai.Client(api_key=key)
 
 
 def generate_descriptions(
@@ -75,9 +79,6 @@ def generate_descriptions(
     if not episode_title or not episode_title.strip():
         raise SummaryError("Episode title is empty")
 
-    # Configure API
-    configure_gemini(api_key)
-
     # Build the prompt
     prompt = f"""You are a podcast content assistant. Based on the following transcript, generate content for publishing this episode.
 
@@ -114,11 +115,13 @@ TAGS: [tag1, tag2, tag3, ...]
 """
 
     try:
-        model = genai.GenerativeModel(model_name)
+        # Create client
+        client = get_gemini_client(api_key)
 
-        response = model.generate_content(
-            prompt,
-            generation_config=genai.GenerationConfig(
+        response = client.models.generate_content(
+            model=model_name,
+            contents=prompt,
+            config=types.GenerateContentConfig(
                 temperature=0.7,
                 max_output_tokens=4096,
             ),
