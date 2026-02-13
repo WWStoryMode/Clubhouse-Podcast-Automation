@@ -371,19 +371,45 @@ def create_base_image(
         else:
             actual_title_y = int(title_y_cfg)
 
-        # Word wrap for title
+        # Word wrap for title (word-boundary aware with CJK fallback)
         lines = []
         current_line = ""
 
-        for char in title:
-            test_line = current_line + char
+        # Split into words first for word-boundary wrapping
+        words = title.split()
+
+        for word in words:
+            # Try adding the whole word to current line
+            test_line = f"{current_line} {word}" if current_line else word
             bbox = draw.textbbox((0, 0), test_line, font=font)
+
             if bbox[2] - bbox[0] <= title_max_width:
                 current_line = test_line
             else:
-                if current_line:
-                    lines.append(current_line)
-                current_line = char
+                # Word doesn't fit - check if the word itself is too wide
+                word_bbox = draw.textbbox((0, 0), word, font=font)
+                word_width = word_bbox[2] - word_bbox[0]
+
+                if word_width > title_max_width:
+                    # Very long word (or CJK string without spaces) - wrap char-by-char
+                    if current_line:
+                        lines.append(current_line)
+                        current_line = ""
+
+                    for char in word:
+                        test_line = current_line + char
+                        bbox = draw.textbbox((0, 0), test_line, font=font)
+                        if bbox[2] - bbox[0] <= title_max_width:
+                            current_line = test_line
+                        else:
+                            if current_line:
+                                lines.append(current_line)
+                            current_line = char
+                else:
+                    # Word fits on its own line - wrap at word boundary
+                    if current_line:
+                        lines.append(current_line)
+                    current_line = word
 
         if current_line:
             lines.append(current_line)
