@@ -154,7 +154,7 @@ Instructions:
             contents=[prompt, audio_file],
             config=types.GenerateContentConfig(
                 temperature=0.1,  # Low temperature for accuracy
-                max_output_tokens=8192,
+                max_output_tokens=65536,
             ),
         )
 
