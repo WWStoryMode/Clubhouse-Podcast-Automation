@@ -624,6 +624,7 @@ def generate_video(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    base_image_path = None
     try:
         # Load video config if provided
         layout_config = load_video_config(video_config_path)
@@ -783,9 +784,6 @@ def generate_video(
                 text=True,
             )
 
-        # Clean up temp file
-        base_image_path.unlink(missing_ok=True)
-
         if result.returncode != 0:
             raise VideoGenerationError(f"ffmpeg failed: {result.stderr}")
 
@@ -798,3 +796,7 @@ def generate_video(
         raise
     except Exception as e:
         raise VideoGenerationError(f"Failed to generate video: {e}")
+    finally:
+        # Always clean up temp file, even on failure
+        if base_image_path is not None:
+            base_image_path.unlink(missing_ok=True)
