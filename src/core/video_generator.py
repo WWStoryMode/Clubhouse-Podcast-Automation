@@ -572,6 +572,7 @@ def generate_video(
     icon_size: Tuple[int, int] = (200, 200),
     compact: bool = False,
     encoder: str = "auto",
+    video_bitrate: Optional[str] = None,
     video_config_path: Optional[Path] = None,
     show_progress: bool = True,
     ffmpeg_path: str = "ffmpeg",
@@ -599,6 +600,8 @@ def generate_video(
         icon_size: Size for icon/logo
         compact: Use compact encoding (smaller file, slower encoding)
         encoder: Encoder to use (auto, cpu, videotoolbox, nvenc, vaapi, qsv, amf)
+        video_bitrate: Override video bitrate (e.g., "2M", "1500k"). Overrides
+                       default CRF/bitrate settings for all encoders.
         video_config_path: Path to video layout config YAML file
         show_progress: Whether to show progress
         ffmpeg_path: Path to ffmpeg executable
@@ -747,12 +750,18 @@ def generate_video(
         cmd.extend(encoder_config["extra_args"])
 
         # Add quality settings (different for CPU vs hardware)
-        if selected_encoder == "cpu":
+        if video_bitrate:
+            # User-specified bitrate overrides all encoder-specific logic
+            if selected_encoder == "cpu":
+                cmd.extend(["-preset", preset])
+            cmd.extend(["-b:v", video_bitrate])
+        elif selected_encoder == "cpu":
             cmd.extend(["-preset", preset, "-crf", crf])
         elif selected_encoder == "videotoolbox":
             # VideoToolbox uses bitrate mode
-            bitrate = "2M" if compact else "4M"
-            cmd.extend(["-b:v", bitrate])
+            # Static background + waveform needs modest bitrate
+            vt_bitrate = "1M" if compact else "2M"
+            cmd.extend(["-b:v", vt_bitrate])
         elif selected_encoder == "nvenc":
             # NVENC uses -cq for constant quality mode
             cmd.extend(["-rc", "vbr", "-cq", crf, "-preset", "p4" if compact else "p1"])

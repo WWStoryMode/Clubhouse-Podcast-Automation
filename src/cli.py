@@ -275,9 +275,11 @@ def parse_color(color_str: str) -> tuple:
 @click.option("--encoder", "-e", default="auto",
               type=click.Choice(["auto", "cpu", "videotoolbox", "nvenc", "vaapi", "qsv", "amf"]),
               help="Video encoder (default: auto-detect)")
+@click.option("--video-bitrate", default=None,
+              help="Override video bitrate (e.g., '2M', '1500k'). Overrides default CRF/bitrate settings.")
 @click.option("--list-encoders", is_flag=True, help="List available encoders and exit")
 @click.pass_context
-def generate_video_cmd(ctx, input_path, output, title, background, icon, video_config, width, height, fps, waveform_width, waveform_height, waveform_color, bg_color, compact, encoder, list_encoders):
+def generate_video_cmd(ctx, input_path, output, title, background, icon, video_config, width, height, fps, waveform_width, waveform_height, waveform_color, bg_color, compact, encoder, video_bitrate, list_encoders):
     """Generate video with waveform visualization from audio using ffmpeg."""
     # Handle --list-encoders
     if list_encoders:
@@ -293,6 +295,10 @@ def generate_video_cmd(ctx, input_path, output, title, background, icon, video_c
         raise click.UsageError("Missing option '--input' / '-i'.")
 
     config = ctx.obj["config"]
+
+    # Resolve video bitrate: CLI flag > config file > built-in default (None)
+    if video_bitrate is None:
+        video_bitrate = config.get("video", {}).get("bitrate", None)
 
     # Parse colors
     waveform_color_tuple = parse_color(waveform_color)
@@ -354,6 +360,8 @@ def generate_video_cmd(ctx, input_path, output, title, background, icon, video_c
     click.echo(f"Resolution: {width}x{height} @ {fps}fps")
     click.echo(f"Waveform: {waveform_width}x{waveform_height}")
     click.echo(f"Encoding: {'compact' if compact else 'fast'}")
+    if video_bitrate:
+        click.echo(f"Video bitrate: {video_bitrate}")
     if title:
         click.echo(f"Title: {title}")
 
@@ -373,6 +381,7 @@ def generate_video_cmd(ctx, input_path, output, title, background, icon, video_c
             bg_color=bg_color_tuple,
             compact=compact,
             encoder=encoder,
+            video_bitrate=video_bitrate,
             video_config_path=video_config_path,
             show_progress=True,
         )

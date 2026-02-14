@@ -84,7 +84,7 @@ video:
 
   # Video encoding
   codec: "libx264"
-  bitrate: "5000k"
+  # bitrate: "2M"  # Override video bitrate (e.g., "2M", "1500k"). Omit to use smart defaults.
 
 # -----------------------------
 # Transcription Settings [BOTH]
