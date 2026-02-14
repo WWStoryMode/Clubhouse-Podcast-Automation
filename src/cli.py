@@ -279,9 +279,10 @@ def parse_color(color_str: str) -> tuple:
               help="Video encoder (default: auto-detect)")
 @click.option("--video-bitrate", default=None,
               help="Override video bitrate (e.g., '2M', '1500k'). Overrides default CRF/bitrate settings.")
+@click.option("--duration", type=float, default=None, help="Limit video to N seconds (e.g., 30 for a 30s preview)")
 @click.option("--list-encoders", is_flag=True, help="List available encoders and exit")
 @click.pass_context
-def generate_video_cmd(ctx, input_path, output, title, background, icon, video_config, width, height, fps, waveform_width, waveform_height, waveform_color, bg_color, compact, encoder, video_bitrate, list_encoders):
+def generate_video_cmd(ctx, input_path, output, title, background, icon, video_config, width, height, fps, waveform_width, waveform_height, waveform_color, bg_color, compact, encoder, video_bitrate, duration, list_encoders):
     """Generate video with waveform visualization from audio using ffmpeg."""
     # Handle --list-encoders
     if list_encoders:
@@ -366,6 +367,8 @@ def generate_video_cmd(ctx, input_path, output, title, background, icon, video_c
         click.echo(f"Video bitrate: {video_bitrate}")
     if title:
         click.echo(f"Title: {title}")
+    if duration:
+        click.echo(f"Duration limit: {duration}s")
 
     try:
         result = generate_video(
@@ -385,6 +388,7 @@ def generate_video_cmd(ctx, input_path, output, title, background, icon, video_c
             encoder=encoder,
             video_bitrate=video_bitrate,
             video_config_path=video_config_path,
+            duration=duration,
             show_progress=True,
         )
         click.echo(f"Video saved to: {result}")
@@ -610,6 +614,19 @@ def process(ctx, url, title, output, resume, interactive):
             if interactive:
                 _confirm_step("[1/5] Download", video_path)
 
+        # In interactive mode, prompt for optional trim times before extraction
+        trim_start = None
+        trim_end = None
+        if interactive:
+            trim_start = click.prompt(
+                "Trim start time (HH:MM:SS or empty to skip)",
+                default="", show_default=False,
+            ).strip() or None
+            trim_end = click.prompt(
+                "Trim end time (HH:MM:SS or empty to skip)",
+                default="", show_default=False,
+            ).strip() or None
+
         # Step 2: Extract audio
         if resume and state.audio_path.exists():
             click.echo("\n[2/5] Extracting audio... SKIPPED (exists)")
@@ -620,6 +637,9 @@ def process(ctx, url, title, output, resume, interactive):
                 video_path=video_path,
                 ffmpeg_path=config["local"].get("ffmpeg_path", "ffmpeg"),
                 overwrite=True,
+                trim_start=trim_start,
+                trim_end=trim_end,
+                normalize=True,
             )
             click.echo(f"      Extracted: {audio_path}")
             if interactive:

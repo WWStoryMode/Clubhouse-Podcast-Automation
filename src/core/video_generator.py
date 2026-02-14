@@ -577,6 +577,7 @@ def generate_video(
     show_progress: bool = True,
     ffmpeg_path: str = "ffmpeg",
     ffprobe_path: str = "ffprobe",
+    duration: Optional[float] = None,
     # Legacy parameters (kept for backward compatibility)
     num_bars: int = 64,
     bar_color: Optional[Tuple[int, int, int]] = None,
@@ -645,10 +646,19 @@ def generate_video(
         # Get audio duration
         if show_progress:
             print("Getting audio duration...")
-        duration = get_audio_duration(audio_path, ffprobe_path)
+        audio_duration = get_audio_duration(audio_path, ffprobe_path)
+
+        # Cap to requested duration if specified
+        if duration is not None and duration < audio_duration:
+            effective_duration = duration
+        else:
+            effective_duration = audio_duration
 
         if show_progress:
-            print(f"Audio duration: {duration:.1f} seconds")
+            if duration is not None and duration < audio_duration:
+                print(f"Audio duration: {audio_duration:.1f}s (limited to {effective_duration:.1f}s)")
+            else:
+                print(f"Audio duration: {audio_duration:.1f} seconds")
 
         # Create base image with background, icon, and title
         if show_progress:
@@ -694,7 +704,7 @@ def generate_video(
             wave_y = int(wave_y_cfg)
 
         filter_complex = (
-            f"[1:v]loop=loop=-1:size=1:start=0,trim=duration={duration},fps={fps}[bg];"
+            f"[1:v]loop=loop=-1:size=1:start=0,trim=duration={effective_duration},fps={fps}[bg];"
             f"[0:a]showwaves=s={waveform_width}x{waveform_height}:mode=cline:rate={fps}:"
             f"colors={waveform_color_hex}:scale=cbrt:draw=full[wave];"
             f"[bg][wave]overlay={wave_x}:{wave_y}[out]"
@@ -768,6 +778,10 @@ def generate_video(
         elif selected_encoder in ("vaapi", "qsv", "amf"):
             # Use global quality for other hardware encoders
             cmd.extend(["-global_quality", crf])
+
+        # Limit output duration if requested
+        if duration is not None and duration < audio_duration:
+            cmd.extend(["-t", str(effective_duration)])
 
         # Add audio settings
         cmd.extend([
