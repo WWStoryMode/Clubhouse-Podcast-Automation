@@ -1,6 +1,7 @@
 """Command-line interface for Clubhouse-Podcast-Automation."""
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
@@ -13,6 +14,7 @@ from .core.downloader import download_clubhouse_video, DownloadError
 from .core.audio_extractor import extract_audio, AudioExtractionError
 from .core.transcriber import transcribe_audio, transcribe_audio_chunked, TranscriptionError
 from .core.summarizer import generate_descriptions, SummaryError
+from .core.pipeline import PipelineState, get_episode_id_from_url
 from .core.video_generator import generate_video, generate_preview_frame, VideoGenerationError, get_available_encoders
 from .core.youtube_uploader import upload_video as youtube_upload, load_metadata_from_yaml, YouTubeUploadError
 
@@ -554,9 +556,11 @@ def upload_youtube_cmd(ctx, video_path, title, description, tags, metadata, priv
 @click.option("--url", "-u", required=True, help="Clubhouse recording URL")
 @click.option("--title", "-t", required=True, help="Episode title")
 @click.option("--output", "-o", type=click.Path(), help="Output directory")
+@click.option("--resume", is_flag=True, help="Resume from last successful step (skip steps with existing output files)")
+@click.option("--interactive", "-I", is_flag=True, help="Review each step's output before continuing")
 @click.pass_context
-def process(ctx, url, title, output):
-    """Run the full processing pipeline (download -> extract -> transcribe -> summarize)."""
+def process(ctx, url, title, output, resume, interactive):
+    """Run the full processing pipeline (download -> extract -> transcribe -> summarize -> generate video)."""
     config = ctx.obj["config"]
     api_key = os.environ.get("GEMINI_API_KEY")
 
@@ -566,70 +570,172 @@ def process(ctx, url, title, output):
 
     output_base = Path(output) if output else Path(config["local"]["output_dir"])
 
+    episode_id = get_episode_id_from_url(url)
+    state = PipelineState(episode_id, output_base)
+
     click.echo(f"Processing: {title}")
+    click.echo(f"Episode ID: {episode_id}")
     click.echo("=" * 50)
+
+    if resume:
+        completed = state.get_completed_steps()
+        if completed:
+            click.echo(f"Resuming — completed steps: {', '.join(completed)}")
+        next_step = state.get_next_step()
+        if next_step is None:
+            click.echo("\nAll steps already complete. Nothing to do.")
+            return
+
+    def _confirm_step(step_label, file_path):
+        """Open output in Finder and prompt the user to confirm before continuing."""
+        path = Path(file_path)
+        subprocess.run(["open", "-R", str(path)])
+        if not click.confirm(f"{step_label} result OK? Continue?", default=True):
+            click.echo("Pipeline aborted by user.")
+            sys.exit(0)
 
     try:
         # Step 1: Download
-        click.echo("\n[1/4] Downloading video...")
-        audio_dir = output_base / "audio"
-        video_path = download_clubhouse_video(
-            url=url,
-            output_dir=audio_dir,
-        )
-        click.echo(f"      Downloaded: {video_path}")
+        if resume and state.video_path.exists():
+            click.echo("\n[1/5] Downloading video... SKIPPED (exists)")
+            video_path = state.video_path
+        else:
+            click.echo("\n[1/5] Downloading video...")
+            audio_dir = output_base / "audio"
+            video_path = download_clubhouse_video(
+                url=url,
+                output_dir=audio_dir,
+            )
+            click.echo(f"      Downloaded: {video_path}")
+            if interactive:
+                _confirm_step("[1/5] Download", video_path)
 
         # Step 2: Extract audio
-        click.echo("\n[2/4] Extracting audio...")
-        audio_path = extract_audio(
-            video_path=video_path,
-            ffmpeg_path=config["local"].get("ffmpeg_path", "ffmpeg"),
-            overwrite=True,
-        )
-        click.echo(f"      Extracted: {audio_path}")
+        if resume and state.audio_path.exists():
+            click.echo("\n[2/5] Extracting audio... SKIPPED (exists)")
+            audio_path = state.audio_path
+        else:
+            click.echo("\n[2/5] Extracting audio...")
+            audio_path = extract_audio(
+                video_path=video_path,
+                ffmpeg_path=config["local"].get("ffmpeg_path", "ffmpeg"),
+                overwrite=True,
+            )
+            click.echo(f"      Extracted: {audio_path}")
+            if interactive:
+                _confirm_step("[2/5] Extract", audio_path)
 
         # Step 3: Transcribe
-        click.echo("\n[3/4] Transcribing audio...")
-        transcript = transcribe_audio(
-            audio_path=audio_path,
-            api_key=api_key,
-            language=config.get("transcription", {}).get("language", "en"),
-        )
+        if resume and state.transcript_path.exists():
+            click.echo("\n[3/5] Transcribing audio... SKIPPED (exists)")
+            transcript_path = state.transcript_path
+            transcript = transcript_path.read_text()
+        else:
+            click.echo("\n[3/5] Transcribing audio...")
+            transcript = transcribe_audio(
+                audio_path=audio_path,
+                api_key=api_key,
+                language=config.get("transcription", {}).get("language", "en"),
+            )
 
-        transcript_dir = output_base / "transcripts"
-        transcript_dir.mkdir(parents=True, exist_ok=True)
-        transcript_path = transcript_dir / f"{audio_path.stem}_transcript.txt"
-        transcript_path.write_text(transcript)
-        click.echo(f"      Transcript: {transcript_path}")
+            transcript_dir = output_base / "transcripts"
+            transcript_dir.mkdir(parents=True, exist_ok=True)
+            transcript_path = state.transcript_path
+            transcript_path.write_text(transcript)
+            click.echo(f"      Transcript: {transcript_path}")
+            if interactive:
+                _confirm_step("[3/5] Transcribe", transcript_path)
 
         # Step 4: Generate descriptions
-        click.echo("\n[4/4] Generating descriptions...")
-        summary_config = config.get("summary", {})
-        descriptions = generate_descriptions(
-            transcript=transcript,
-            episode_title=title,
-            api_key=api_key,
-            youtube_max_length=summary_config.get("youtube_max_length", 5000),
-            spotify_max_length=summary_config.get("spotify_max_length", 4000),
-            generate_tags=summary_config.get("generate_tags", True),
-            max_tags=summary_config.get("max_tags", 10),
-        )
+        if resume and state.descriptions_path.exists():
+            click.echo("\n[4/5] Generating descriptions... SKIPPED (exists)")
+            desc_path = state.descriptions_path
+            with open(desc_path) as f:
+                descriptions = yaml.safe_load(f)
+        else:
+            click.echo("\n[4/5] Generating descriptions...")
+            summary_config = config.get("summary", {})
+            descriptions = generate_descriptions(
+                transcript=transcript,
+                episode_title=title,
+                api_key=api_key,
+                youtube_max_length=summary_config.get("youtube_max_length", 5000),
+                spotify_max_length=summary_config.get("spotify_max_length", 4000),
+                generate_tags=summary_config.get("generate_tags", True),
+                max_tags=summary_config.get("max_tags", 10),
+            )
 
-        desc_dir = output_base / "descriptions"
-        desc_dir.mkdir(parents=True, exist_ok=True)
-        desc_path = desc_dir / f"{audio_path.stem}_descriptions.yaml"
-        with open(desc_path, "w") as f:
-            yaml.dump(descriptions, f, default_flow_style=False, allow_unicode=True)
-        click.echo(f"      Descriptions: {desc_path}")
+            desc_dir = output_base / "descriptions"
+            desc_dir.mkdir(parents=True, exist_ok=True)
+            desc_path = state.descriptions_path
+            with open(desc_path, "w") as f:
+                yaml.dump(descriptions, f, default_flow_style=False, allow_unicode=True)
+            click.echo(f"      Descriptions: {desc_path}")
+            if interactive:
+                _confirm_step("[4/5] Summarize", desc_path)
+
+        # Step 5: Generate video
+        if resume and state.generated_video_path.exists():
+            click.echo("\n[5/5] Generating video... SKIPPED (exists)")
+            generated_video_path = state.generated_video_path
+        else:
+            click.echo("\n[5/5] Generating video...")
+            video_config = config.get("video", {})
+
+            # Resolve template paths
+            background_path = None
+            for bg_candidate in [Path("templates/background.png"), Path("templates/background_placeholder.png")]:
+                if bg_candidate.exists():
+                    background_path = bg_candidate
+                    break
+
+            icon_path = None
+            for icon_candidate in [Path("templates/logo.png"), Path("templates/logo_placeholder.png")]:
+                if icon_candidate.exists():
+                    icon_path = icon_candidate
+                    break
+
+            video_config_path = None
+            default_video_config = Path("templates/video_config.yaml")
+            if default_video_config.exists():
+                video_config_path = default_video_config
+
+            videos_dir = output_base / "videos"
+            videos_dir.mkdir(parents=True, exist_ok=True)
+            generated_video_path = state.generated_video_path
+
+            generated_video_path = generate_video(
+                audio_path=audio_path,
+                output_path=generated_video_path,
+                title=title,
+                background_path=background_path,
+                icon_path=icon_path,
+                width=video_config.get("width", 1920),
+                height=video_config.get("height", 1080),
+                fps=video_config.get("fps", 30),
+                waveform_width=video_config.get("waveform_width", 960),
+                waveform_height=video_config.get("waveform_height", 200),
+                waveform_color=parse_color(video_config.get("waveform_color", "240,240,240")),
+                bg_color=parse_color(video_config.get("bg_color", "20,20,30")),
+                compact=video_config.get("compact", False),
+                encoder=video_config.get("encoder", "auto"),
+                video_bitrate=video_config.get("bitrate", None),
+                video_config_path=video_config_path,
+                show_progress=True,
+            )
+            click.echo(f"      Video: {generated_video_path}")
+            if interactive:
+                _confirm_step("[5/5] Generate video", generated_video_path)
 
         # Summary
         click.echo("\n" + "=" * 50)
         click.echo("Processing complete!")
         click.echo(f"\nOutputs:")
-        click.echo(f"  Video:       {video_path}")
-        click.echo(f"  Audio:       {audio_path}")
-        click.echo(f"  Transcript:  {transcript_path}")
-        click.echo(f"  Descriptions: {desc_path}")
+        click.echo(f"  Video:       {state.video_path}")
+        click.echo(f"  Audio:       {state.audio_path}")
+        click.echo(f"  Transcript:  {state.transcript_path}")
+        click.echo(f"  Descriptions: {state.descriptions_path}")
+        click.echo(f"  Generated:   {state.generated_video_path}")
         click.echo(f"\nYouTube Title: {descriptions['youtube_title']}")
         click.echo(f"Tags: {', '.join(descriptions['tags'])}")
 
@@ -644,6 +750,9 @@ def process(ctx, url, title, output):
         sys.exit(1)
     except SummaryError as e:
         click.echo(f"\nSummary error: {e}", err=True)
+        sys.exit(1)
+    except VideoGenerationError as e:
+        click.echo(f"\nVideo generation error: {e}", err=True)
         sys.exit(1)
 
 
