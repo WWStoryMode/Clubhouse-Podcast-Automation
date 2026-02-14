@@ -652,10 +652,11 @@ def process(ctx, url, title, output, resume, interactive):
             transcript = transcript_path.read_text()
         else:
             click.echo("\n[3/5] Transcribing audio...")
-            transcript = transcribe_audio(
+            transcript = transcribe_audio_chunked(
                 audio_path=audio_path,
                 api_key=api_key,
                 language=config.get("transcription", {}).get("language", "en"),
+                show_progress=True,
             )
 
             transcript_dir = output_base / "transcripts"

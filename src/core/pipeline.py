@@ -10,15 +10,18 @@ STEP_NAMES = ["download", "extract", "transcribe", "summarize", "generate_video"
 def get_episode_id_from_url(url: str) -> str:
     """Extract episode ID from a Clubhouse URL.
 
-    Takes the last non-empty path segment and strips query params.
+    Takes the last non-empty path segment and strips query params and file extensions.
     e.g. "https://www.clubhouse.com/room/19204125?foo=bar" -> "19204125"
+         "https://...s3.amazonaws.com/.../19453826.mp4?..." -> "19453826"
     """
     parsed = urlparse(url)
     path_parts = parsed.path.strip("/").split("/")
     for part in reversed(path_parts):
         segment = part.split("?")[0]
         if segment:
-            return segment
+            # Strip file extension (e.g. ".mp4") to get the raw ID
+            stem = Path(segment).stem
+            return stem if stem else segment
     raise ValueError(f"Cannot extract episode ID from URL: {url}")
 
 
